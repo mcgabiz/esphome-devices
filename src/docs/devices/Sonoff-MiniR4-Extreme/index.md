@@ -171,3 +171,204 @@ binary_sensor:
         - light.turn_off:
             id: light_1
 ```
+
+## Improved config
+  ## Configuration for input - flip switch / momentary button
+  ## Configuration for relay - detach (input and relay can be used independently)
+
+```yaml
+substitutions:
+  device_name: minir4
+  friendly_name: SONOFF MINI R4
+  update_interval: 600s
+
+globals:
+  # push button (true) or flip switch (false)
+  # works if the relay is not disconnected, otherwise has no effect
+  - id: input_as_button
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+
+  # detach relay
+  - id: detach_relay
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid:  ${device_name}
+    password: !secret hotspot_password
+
+captive_portal:
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+time:
+  - platform: homeassistant
+
+web_server:
+  port: 80
+  version: 3
+
+# Diagnostics
+sensor:
+  - platform: wifi_signal
+    name: Wifi Signal Strength
+    update_interval: ${update_interval}
+    entity_category: "diagnostic"
+    icon: mdi:signal-cellular-outline
+
+  - platform: uptime
+    name: Uptime
+    update_interval: ${update_interval}
+    entity_category: "diagnostic"
+    icon: mdi:timer-outline
+
+text_sensor:
+  - platform: wifi_info
+    ssid:
+      name: Connected to
+      icon: mdi:wifi
+    dns_address:
+      name: DNS Address
+      icon: mdi:dns
+    ip_address:
+      name: IP Address
+      icon: mdi:ip-network-outline
+
+status_led:
+  pin:
+    number: GPIO19
+    inverted: true
+
+output:
+  # Relay on GPIO
+  - platform: gpio
+    pin: GPIO26
+    id: relay_1
+
+
+light:
+  - platform: binary
+    id: light_1
+    name: Relay
+    entity_category: ""
+    web_server:
+      sorting_weight: 20
+    icon: mdi:electric-switch
+    output: relay_1
+
+# Button on device
+binary_sensor:
+  - platform: gpio
+    pin: GPIO00
+    id: button
+    filters:
+      - invert:
+      - delayed_off: 50ms
+    on_press:
+      - light.toggle:
+          id: light_1
+
+# S1 S2
+  - platform: gpio
+    name: Input
+    pin: GPIO27
+    entity_category: ""
+    icon: mdi:import
+    web_server:
+      sorting_weight: 10
+    id: s1
+    filters:
+      - invert:
+      - delayed_off: 50ms 
+    on_press:
+      then:
+        - if:
+            # Relay affected only if not detached
+            condition:
+              lambda: 'return !id(detach_relay);'
+            then:
+              - if:
+                  # Toggle if input as button
+                  condition:
+                    lambda: 'return id(input_as_button);'
+                  then:
+                    - light.toggle:
+                        id: light_1
+                  # Turning on if input as switch
+                  else:
+                    - light.turn_on:
+                        id: light_1
+    on_release:
+      then:
+        - if:
+            # Turning off if not detached and input is not button
+            condition:
+              lambda: 'return !id(detach_relay) && !id(input_as_button);'
+            then:
+              - light.turn_off:
+                  id: light_1
+
+# Configuration switches
+switch:
+  - platform: template
+    name: "Input as button"
+    id: act_as_button_ui
+    icon: mdi:gesture-tap-button
+    entity_category: "config"
+    web_server:
+      sorting_weight: 30
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: 'return id(input_as_button);'
+    turn_on_action:
+      - globals.set: {id: input_as_button, value: 'true'}
+      # Force sync
+      - lambda: 'global_preferences->sync();'
+    turn_off_action:
+      - globals.set: {id: input_as_button, value: 'false'}
+      # Force sync
+      - lambda: 'global_preferences->sync();'
+
+  - platform: template
+    name: "Detach relay"
+    id: detach_relay_ui
+    icon: mdi:power-plug-off-outline
+    entity_category: "config"
+    web_server:
+      sorting_weight: 40
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    lambda: 'return id(detach_relay);'
+    turn_on_action:
+      - globals.set: {id: detach_relay, value: 'true'}
+      # Force sync
+      - lambda: 'global_preferences->sync();'
+    turn_off_action:
+      - globals.set: {id: detach_relay, value: 'false'}
+      # Force sync
+      - lambda: 'global_preferences->sync();'
+```
